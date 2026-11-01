@@ -7,7 +7,7 @@ folder. nestfolder adds that: you can put a folder inside a folder, open it, and
 manage it like any other folder.
 
 > **Supports retail firmware 3.60–3.74 and devkit/testkit firmware
-> 3.600.011–3.730.011, including the mapped internal SceShell variants.**
+> 3.600.011–3.730.011.** Tested on a real Vita on 3.65; other firmwares were checked against their SceShell binaries.
 
 ## Features
 
