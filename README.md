@@ -6,7 +6,8 @@ The stock Vita lets you group apps into folders, but a folder can't hold another
 folder. nestfolder adds that: you can put a folder inside a folder, open it, and
 manage it like any other folder.
 
-> **Firmware 3.65 retail only.** On other firmwares the plugin does nothing.
+> **Supports retail firmware 3.60–3.74 and devkit/testkit firmware
+> 3.600.011–3.730.011, including the mapped internal SceShell variants.**
 
 ## Features
 
@@ -47,8 +48,9 @@ points, keeps the outer folder alive, and teaches the Shell to accept a folder
 as a folder's content. It also gives each folder a unique ID, refreshes nested
 folder icons and draws them into the outer folder's icon.
 
-Before hooking anything, the plugin checks that the Shell code matches 3.65
-retail, so it never patches something it doesn't recognise.
+Before hooking anything, the plugin matches the loaded Shell to a known profile
+using both segment sizes and stable code signatures. It then validates every
+private hook site, so it never patches something it does not recognise.
 
 The installer is a small Vita app that copies the plugin, edits `config.txt` and
 updates `app.db` (the home screen database) safely, with a backup.

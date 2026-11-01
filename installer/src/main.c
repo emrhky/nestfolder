@@ -48,8 +48,8 @@
 #include "vfs_sceio.h"
 #include "vsqlite.h"
 
-#define APP_VERSION    "1.0.2"
-#define PLUGIN_VERSION "1.0.2"
+#define APP_VERSION    "1.0.3"
+#define PLUGIN_VERSION "1.0.3"
 
 int g_tr;   /* lang.h */
 
@@ -1089,8 +1089,8 @@ static void draw_menu(int sel)
 	}
 	snprintf(buf, sizeof(buf), TR("First backup: %s", "İlk yedek: %s"), S.first ? FIRST_DIR : TR("none", "yok"));
 	draw_line(6, buf, S.first ? C_TEXT : C_ERR, C_BG);
-	draw_line(7, TR("3.65 retail only. The Vita restarts after every operation.",
-	                "Yalnızca 3.65 retail. Her işlemden sonra Vita yeniden başlatılır."), C_DIM, C_BG);
+	draw_line(7, TR("3.60+ retail/devkit/testkit. Restarts after each operation.",
+	                "3.60+ retail/devkit/testkit. Her işlemden sonra yeniden başlar."), C_DIM, C_BG);
 
 	for (int i = 0; i < MENU_N; i++) {
 		uint32_t bg = i == sel ? C_SEL_BG : C_BG;

@@ -1,5 +1,5 @@
 /*
- * nestfolder 1.0.2 - PS Vita (3.65 retail) LiveArea ic ice klasor eklentisi
+ * nestfolder 1.0.3 - PS Vita (bilinen 3.60+ SceShell duzenleri) LiveArea ic ice klasor eklentisi
  *
  * Ozet:
  *  - Klasor icinde klasor acma (en fazla 2 seviye). Ic klasor acilirken
@@ -11,18 +11,17 @@
  *    (ad degistirme kaydi SetIconInfoJob bunu kullanir).
  *    Kopyanin ad alani (+0x04, paf::wstring {ptr,len}) gercek ogenin metin
  *    bellegini gosteriyordu; gercek oge yok edilince bu bellek serbest
- *    kaliyor, ad degistirme (seg0+0xD00CE -> wstring atama seg0+0x40BA84)
- *    yeni adi yazmadan once ayni bellegi ikinci kez serbest birakiyordu
- *    (ara sira kilitlenme). 2.27: kopya, adin kendi kopyasini tasir.
+ *    kaliyor, ad degistirme Shell wstring atamasindan once ayni bellegi
+ *    ikinci kez serbest birakiyordu (ara sira kilitlenme). 2.27: kopya,
+ *    adin kendi kopyasini tasir.
  *  - Geri (O) ust klasore doner.
- *  - Birakma kontrolu ("oge klasor mu?", seg0+0xCF74C): ana menude her sey
+ *  - Birakma kontrolu ("oge klasor mu?"): ana menude her sey
  *    serbest (titleId'si bos klasor haric); bir klasorun icindeyken alt
  *    klasore uygulama birakilabilir, klasor birakilamaz.
- *  - Klasor olusturulurken titleId atanir (seg0+0x1C6BF2 kancasi, Shell'in
- *    string fonksiyonu seg0+0x40925C). Kullanilan FLDR numaralari acilista
- *    app.db ham taranarak bulunur.
+ *  - Klasor olusturulurken titleId atanir. Kullanilan FLDR numaralari
+ *    acilista app.db ham taranarak bulunur.
  *  - Klasor listesine titleId'si bos oge eklenmesi engellenir.
- *  - Klasor ikonu kucuk resmi (seg0+0xD1C90 -> ReloadFolderIconCaptureJob):
+ *  - Klasor ikonu kucuk resmi (ReloadFolderIconCaptureJob):
  *    is, klasorun icindekileri app.db'den (SceLsdb) okuyup resmi ciziyor ve
  *    satirin reserved05 alanina yaziyor. Shell klasor icerigini app.db'ye
  *    klasor KAPANIRKEN yaziyor; klasor listesi kancasi (FL_ADD) sadece
@@ -37,15 +36,16 @@
  *    (2.20-2.25'te denenen onbellek yenileme yollari kaldirildi: biri ise
  *    yaramadi, onbellekten atma ise Shell'i kilitledi.)
  *
- * Acilis: sabit 20 sn yerine Shell'in global yoneticisi (seg1+0x12154) ve
- * onun gorunum (+0x24) / kuyruk (+0x4) alanlari dolana kadar 100 ms'de bir
+ * Acilis: sabit 20 sn yerine profilin Shell global yoneticisi ve onun
+ * gorunum (+0x24) / kuyruk (+0x4) alanlari dolana kadar 100 ms'de bir
  * bekler, sonra 1 sn daha bekleyip kancalari takar (en fazla 60 sn).
  *
  * Log: her acilista yeni log.txt; onceki acilisin logu log.prev.txt.
  * Yedek: 1.0.0'dan itibaren eklenti app.db yedegi almaz; ilk yedegi kurulum
  * uygulamasi (installer/) bir kez alir.
  *
- * Tum kanca noktalari once 3.65 retail SceShell ile karsilastirilir.
+ * SceShell segment boyutlari ve sabit kod imzalariyla profil secilir; her
+ * kanca noktasi secilen surumun beklenen koduyla karsilastirilir.
  * Ayar: ux0:data/nestfolder/disable, .../snapshot, .../delay20
  */
 #include <psp2/kernel/modulemgr.h>
@@ -56,6 +56,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "shell_profiles.h"
 
 /* ===================================================================
  *  taiHEN
@@ -125,34 +126,11 @@ void nest_log(const char *fmt, ...)
 }
 
 /* ===================================================================
- *  Ayarlar / 3.65 retail SceShell ofsetleri
+ *  Ayarlar / SceShell imzalari
  * =================================================================== */
 #define DISABLE_PATH     NEST_DATA_DIR "/disable"
 
-#define SHELL_SEG0_SIZE  0x005420F4u
-#define OFF_FOLDER_OPEN  0xAFD30u
-#define OFF_FOLDER_CLOSE 0xAD2CCu
-#define OFF_FL_ADD       0xD17C0u
-#define OFF_FL_DEL       0xD192Eu
-#define OFF_GATE1        0xB5FE8u
-#define OFF_GATE2        0xB643Au
-#define OFF_ISFOLDER     0x0CF74Cu  /* oge->kayit->tur == 5 */
-#define OFF_ICONCAPTURE  0x0D1C90u  /* klasor ikonunu yeniden ciz istegi */
-#define OFF_MKFOLDERJOB  0x1C6BF2u  /* CreateNewFolderJob kurucu-sarmalayici */
-#define OFF_STR_ASSIGN   0x40925Cu  /* paf::string::assign(const char*, len) */
-#define OFF_WSTR_ASSIGN  0x40BA84u  /* paf::wstring::operator=(const wstring&) */
-#define OFF_RELOAD       0x0CF7DEu  /* oge ikonunu yukle(oge, zorla): zorla=1 onbellekten atip yeniden yukler */
-#define OFF_CAPFIN       0x0B3146u  /* ReloadFolderIconCaptureJob bitis: is+0x30 = rowid */
-#define RELOAD_FROM_CTOR 0x0CFD54u  /* oge kurucusundaki 0xCF7DE(oge, 0) cagrisinin donus adresi */
-#define OFF_IMGGET       0x0BD3A6u  /* resim onbellegi al/yukle(anahtar, &resim, param, 0, 0) */
-#define CAP_CHILD_RET    0x0B8234u  /* cizim isi alt oge dongusundeki 0xBD3A6 cagrisinin donusu */
-#define OFF_CAP_CALL     0x0B8228u  /* ... ayni cagrinin hazirligi */
-#define OFF_CAP_POS      0x0B8162u  /* alt oge pos -> [sp+0x20] */
-#define OFF_CAP_LIST     0x0B8136u  /* alt oge listesi <- [sp+0x44] */
-#define OFF_FLDR_PARAM   0x0CFB06u  /* 0xCF7DE: klasor yukleyicisi (movw/movt r0), bos metin (movw/movt r6) */
-#define OFF_PAF_FREE     0x45AE88u  /* bellek birakma ice aktarma koku (ARM) */
-#define SEG1_OFF_G       0x12154u
-#define SEG1_OFF_VIEW    0x1280u
+static const shell_profile_t *shell_profile;
 
 static const uint8_t EXPECT_OPEN[16]   = {0x2d,0xe9,0xf0,0x41,0x43,0xf2,0x44,0x03,0xc8,0xf2,0x61,0x13,0x1b,0x68,0x0d,0x1c};
 static const uint8_t EXPECT_CLOSE[16]  = {0x70,0xb5,0x43,0xf2,0x44,0x01,0xc8,0xf2,0x61,0x11,0x09,0x68,0xc4,0xb2,0xd1,0xf8};
@@ -169,9 +147,7 @@ static const uint8_t EXPECT_IMGGET[16] = {0x2d,0xe9,0xf0,0x43,0x99,0xb0,0x0f,0x1
 static const uint8_t EXPECT_CAP_CALL[12] = {0x09,0xa9,0x28,0x1c,0x00,0x22,0x00,0x23,0x05,0xf0,0xb9,0xf8};
 static const uint8_t EXPECT_CAP_POS[6]   = {0xdc,0xf8,0x08,0x00,0x08,0x90};
 static const uint8_t EXPECT_CAP_LIST[4]  = {0xdd,0xf8,0x44,0x80};
-static const uint8_t EXPECT_FLDR_PARAM[16] = {0x44,0xf2,0xa1,0x50,0x4e,0xf6,0x98,0x36,0xc8,0xf2,0x12,0x10,0x1a,0x90,0xce,0xf2};
-static const uint8_t GATE1_ORIG[4] = {0x19,0xf0,0xb0,0xfb};
-static const uint8_t GATE2_ORIG[4] = {0x19,0xf0,0x87,0xf9};
+static const uint8_t EXPECT_FLDR_PARAM[18] = {0x44,0xf2,0xa1,0x50,0x4e,0xf6,0x98,0x36,0xc8,0xf2,0x12,0x10,0x1a,0x90,0xce,0xf2,0x00,0x06};
 
 static uint32_t shell_seg1;
 static tai_hook_ref_t ref_open, ref_close, ref_fladd, ref_fldel, ref_mkjob, ref_isfolder, ref_capture;
@@ -187,7 +163,10 @@ static void cpy32(uint32_t *d, uint32_t src, unsigned n)
 {
 	for (unsigned i = 0; i < n / 4; i++) d[i] = rd32(src + i * 4);
 }
-static uint32_t open_folder_now(void) { return rd32(rd32(shell_seg1 + SEG1_OFF_G) + 0xfc); }
+static uint32_t open_folder_now(void)
+{
+	return shell_profile ? rd32(rd32(shell_seg1 + shell_profile->seg1_g) + 0xfc) : 0;
+}
 
 /* ===================================================================
  *  h slotlari
@@ -406,7 +385,7 @@ static uint32_t open_hook(uint32_t h, uint32_t a, uint32_t b, uint32_t c)
 	uint32_t fc = open_folder_now();
 	if (in_internal || !obj)
 		return ((fn4_t)TAI_NEXT(ref_open))(h, a, b, c);
-	uint32_t *pview = (uint32_t *)(shell_seg1 + SEG1_OFF_VIEW);
+	uint32_t *pview = (uint32_t *)(shell_seg1 + shell_profile->seg1_view);
 	uint32_t r;
 	if (fc != 0 && (cur_slot < 0 || hslots[cur_slot].obj != obj)) {
 		/* 2 seviye siniri: zaten bir ic klasordeysek (nest_depth>=1) daha
@@ -497,7 +476,7 @@ static uint32_t fladd_hook(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
 static uint32_t fldel_hook(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
 { if (a1 == 0) return 0; return ((fn4_t)TAI_NEXT(ref_fldel))(a0, a1, a2, a3); }
 
-/* "Oge klasor mu?" (seg0+0xCF74C). Orijinali hic cagrilmaz: icindeki
+/* "Oge klasor mu?". Orijinali hic cagrilmaz: icindeki
  * cbz, taiHEN'in kopyaladigi trampolinde bozulur. Mantik birebir ayni.
  * Birakma fonksiyonundaki iki kontrol noktasindan (GATE1/GATE2) gelirse
  * "item" suruklenen ogedir ve 1 donusu birakmayi reddeder:
@@ -522,7 +501,7 @@ static uint32_t isfolder_hook(uint32_t item)
 	return is_folder;
 }
 
-/* Klasor ikonu cizim istegi (seg0+0xD1C90). Is, (kap+0x1c = sayfa no,
+/* Klasor ikonu cizim istegi. Is, (kap+0x1c = sayfa no,
  * oge+0x20 = pos) satirinin reserved05 alanina resmi yazar; ad degistirme de
  * ayni satiri (kayit+0x08 = pos) kullanir. Kopya ogeler de buradan gecer. */
 static int is_fake_item(uint32_t p)
@@ -540,16 +519,16 @@ static uint32_t capture_hook(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
  *
  *  Shell klasor resmini "<icerik sayfa no>:<rowid>" anahtariyla bir resim
  *  onbelleginde tutar. Cizim isi yeni resmi app.db'ye yazar; bitiste
- *  (seg0+0xB3146) ogeyi YALNIZCA ana menu sayfalarinda arar (0xAFE82) ve
- *  bulursa 0xCF7DE(oge, 1) ile onbellekten atip yeniden yukler. Ic klasorun
+ *  bitis fonksiyonu ogeyi YALNIZCA ana menu sayfalarinda arar ve
+ *  bulursa reload(oge, 1) ile onbellekten atip yeniden yukler. Ic klasorun
  *  ogesi acik klasorun yuvalarinda (fc+0x08 + 8*i, i<10; sayfalarla ayni
  *  duzen, 0xD3996) durdugu icin bulunamaz ve eski resim onbellekte kalir.
  *
  *  Eklenti, cizimini istedigi her oge icin rowid'i izler:
  *   1 = cizim istendi, 2 = cizim bitti (yenilenmeli).
  *  Ic klasorun ogesi, ust klasor acilirken kurucusunda (0xCFB92) resmini
- *  0xCFD50'den 0xCF7DE(oge, 0) ile onbellekten alir; durum 2 ise hemen
- *  0xCF7DE(oge, 1) ile onbellekten atilip yeniden yuklenir. Acik klasorun
+ *  oge kurucusundan reload(oge, 0) ile onbellekten alir; durum 2 ise hemen
+ *  reload(oge, 1) ile onbellekten atilip yeniden yuklenir. Acik klasorun
  *  fc+0x08 yuvalari bu anda bos oldugu icin bitiste arama yapilmaz.
  *  Shell bir ogeyi (onceden resmi varken) zorla yenilerse izleme biter.
  * =================================================================== */
@@ -596,7 +575,7 @@ static void reload_now(uint32_t item, watch_t *w)
 	}
 }
 
-/* 0xCF7DE(oge, zorla) */
+/* Shell reload(oge, zorla) */
 static uint32_t reload_hook(uint32_t item, uint32_t force, uint32_t a2, uint32_t a3)
 {
 	uint32_t lr = (uint32_t)__builtin_return_address(0);
@@ -613,11 +592,11 @@ static uint32_t reload_hook(uint32_t item, uint32_t force, uint32_t a2, uint32_t
 	/* Ilk yukleme (zorla olsa da onceki resim yoktu) onbellekteki eski resmi
 	 * verdi: bir kez zorla yenile */
 	/* Klasor acilirken oge kurucusu (0xCFB92) resmi 0xCFD50'den yukler; bu
-	 * anda widget ve kendine weak_ptr (+0x40) henuz yok. 0xCF7DE widget
+	 * anda widget ve kendine weak_ptr (+0x40) henuz yok. Reload widget
 	 * yoksa ekran guncellemesini atlar. Gecerli oge: kurucudan gelen ya da
 	 * tam kurulmus (+0x40 == oge). */
 	uint32_t from = (lr & ~1u) - shell_seg0_lo;
-	int valid = from == RELOAD_FROM_CTOR || rd32(item + 0x40) == item;
+	int valid = from == shell_profile->reload_from_ctor || rd32(item + 0x40) == item;
 	if (!is_fake_item(item) && valid && rd32(item + 0x30))
 		reload_now(item, w);
 	return r;
@@ -629,7 +608,7 @@ static uint32_t capfin_hook(uint32_t job, uint32_t a1, uint32_t a2, uint32_t a3)
 	uint32_t lo = rd32(job + 0x30), hi = rd32(job + 0x34);
 	watch_t *w = watch_find(lo, hi);
 	if (w && w->state == 1) w->state = 2;                 /* ana menudeyse Shell yeniler */
-	/* Ana menudeki ogeyi Shell kendisi yeniler (0xCF7DE(oge, 1)); ic klasorun
+	/* Ana menudeki ogeyi Shell kendisi yeniler (reload(oge, 1)); ic klasorun
 	 * ogesi ise klasor acilirken kurulurken yenilenir (reload_hook). */
 	return ((fn4_t)TAI_NEXT(ref_capfin))(job, a1, a2, a3);
 }
@@ -637,22 +616,20 @@ static uint32_t capfin_hook(uint32_t job, uint32_t a1, uint32_t a2, uint32_t a3)
 /* ===================================================================
  *  Ust klasorun kucuk resminde ic klasorun resmi (1.0.1)
  *
- *  Cizim isi (seg0+0xB7FE0) alt ogelerin resimlerini once onbellege alir:
- *  her alt kayit icin iconPath (+0x18) yolunu 0xBD3A6(yol, &resim, 0, 0, 0)
+ *  Cizim isi alt ogelerin resimlerini once onbellege alir:
+ *  her alt kayit icin iconPath (+0x18) yolunu imgget(yol, &resim, 0, 0, 0)
  *  ile ister, {pos, resim} listesine koyar, sonra yuklenmeleri bekleyip
  *  cizer. Klasor kayitlarinin iconPath'i yok; klasor resmi
  *  "<icerik sayfa no>:<rowid>" anahtari ve ozel yukleyiciyle gelir
- *  (0xCF7DE, seg0+0xCFAA6). Bu cagri noktasinda alt kayit bir klasorse istek
- *  ayni anahtar ve parametrelerle yapilir; resim onbellekte ana menu ve
+ *  (reload ve klasor yukleyicisi). Bu cagri noktasinda alt kayit bir klasorse
+ *  istek ayni anahtar ve parametrelerle yapilir; resim onbellekte ana menu ve
  *  klasor icindeki ogeyle ortaktir.
  *  Alt kayit, cagirinin yigindan bulunur: [sp+0x20] = pos, [sp+0x44] =
  *  liste -> {veri, adet}, veri[i] = {kayit, kontrol}.
  *  Kapatmak icin: ux0:data/nestfolder/nosubicon
  * =================================================================== */
 typedef uint32_t (*fn5_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
-typedef void (*paf_free_t)(uint32_t);
 static uint32_t fldr_loader, paf_sempty;
-static paf_free_t paf_free;
 
 static uint32_t cap_child_record(uint32_t csp)
 {
@@ -669,7 +646,7 @@ static uint32_t cap_child_record(uint32_t csp)
 static uint32_t imgget_hook(uint32_t key, uint32_t out, uint32_t param, uint32_t a3, uint32_t s0)
 {
 	uint32_t lr = ((uint32_t)__builtin_return_address(0) & ~1u) - shell_seg0_lo;
-	if (lr != CAP_CHILD_RET || param != 0 || !subicon_on)
+	if (lr != shell_profile->cap_child_ret || param != 0 || !subicon_on)
 		return ((fn5_t)TAI_NEXT(ref_imgget))(key, out, param, a3, s0);
 
 	uint32_t rec = cap_child_record((uint32_t)&s0);   /* &s0 = cagirinin sp'si */
@@ -683,7 +660,7 @@ static uint32_t imgget_hook(uint32_t key, uint32_t out, uint32_t param, uint32_t
 	uint32_t str[4] = {paf_sempty, 0, 0, 0};
 	shell_str_assign((uint32_t)str, buf, len);
 
-	/* 0xCF7DE'nin klasor parametreleri (sp+0x50, 0x54 bayt) */
+	/* Reload fonksiyonunun klasor parametreleri (sp+0x50, 0x54 bayt) */
 	uint32_t pr[0x54 / 4];
 	sceClibMemset(pr, 0, sizeof(pr));
 	uint8_t *pb = (uint8_t *)pr;
@@ -691,7 +668,8 @@ static uint32_t imgget_hook(uint32_t key, uint32_t out, uint32_t param, uint32_t
 	pr[0x18 / 4] = fldr_loader; pr[0x38 / 4] = 1; pr[0x40 / 4] = 0xFFFFFFFFu;
 
 	uint32_t r = ((fn5_t)TAI_NEXT(ref_imgget))((uint32_t)str, out, (uint32_t)pr, 0, 0);
-	if (str[0] != paf_sempty && str[0]) paf_free(str[0]);
+	if (str[0] != paf_sempty && str[0])
+		shell_str_assign((uint32_t)str, NULL, 0);
 	return r;
 }
 
@@ -706,6 +684,23 @@ static uint32_t thumb_imm16(const uint8_t *p)
 {
 	uint16_t h1 = p[0] | (p[1] << 8), h2 = p[2] | (p[3] << 8);
 	return ((h1 & 0xF) << 12) | (((h1 >> 10) & 1) << 11) | (((h2 >> 12) & 7) << 8) | (h2 & 0xFF);
+}
+static int thumb_bl_targets(const uint8_t *code, const uint8_t *target)
+{
+	uint16_t h1 = code[0] | (code[1] << 8);
+	uint16_t h2 = code[2] | (code[3] << 8);
+	if ((h1 & 0xF800u) != 0xF000u || (h2 & 0xD000u) != 0xD000u)
+		return 0;
+	uint32_t s = (h1 >> 10) & 1u;
+	uint32_t j1 = (h2 >> 13) & 1u;
+	uint32_t j2 = (h2 >> 11) & 1u;
+	uint32_t i1 = (~(j1 ^ s)) & 1u;
+	uint32_t i2 = (~(j2 ^ s)) & 1u;
+	uint32_t imm25 = (s << 24) | (i1 << 23) | (i2 << 22) |
+	                 ((h1 & 0x03FFu) << 12) | ((h2 & 0x07FFu) << 1);
+	int32_t displacement = (int32_t)(imm25 << 7) >> 7;
+	uint32_t destination = (uint32_t)code + 4u + (uint32_t)displacement;
+	return destination == (uint32_t)target;
 }
 static int code_matches(const uint8_t *code, const uint8_t *expect, int len)
 {
@@ -738,6 +733,30 @@ static SceUID hook_at(tai_hook_ref_t *ref, SceUID modid, uint32_t off, const voi
 }
 static int bytes_equal(const uint8_t *a, const uint8_t *b, int n)
 { for (int i = 0; i < n; i++) if (a[i] != b[i]) return 0; return 1; }
+
+static int shell_profile_matches(const uint8_t *seg0, const shell_profile_t *p)
+{
+	return code_matches(seg0 + p->folder_open, EXPECT_OPEN, sizeof(EXPECT_OPEN)) &&
+	       code_matches(seg0 + p->folder_close, EXPECT_CLOSE, sizeof(EXPECT_CLOSE)) &&
+	       code_matches(seg0 + p->isfolder, EXPECT_ISFOLDER, sizeof(EXPECT_ISFOLDER)) &&
+	       code_matches(seg0 + p->str_assign, EXPECT_STR_ASSIGN, sizeof(EXPECT_STR_ASSIGN)) &&
+	       code_matches(seg0 + p->wstr_assign, EXPECT_WSTR_ASSIGN, sizeof(EXPECT_WSTR_ASSIGN));
+}
+
+static const shell_profile_t *shell_profile_find(const uint8_t *seg0,
+		uint32_t seg0_size, uint32_t seg1_size)
+{
+	const shell_profile_t *found = NULL;
+	for (unsigned i = 0; i < sizeof(shell_profiles) / sizeof(shell_profiles[0]); i++) {
+		const shell_profile_t *p = &shell_profiles[i];
+		if (p->seg0_size != seg0_size || p->seg1_size != seg1_size ||
+		    !shell_profile_matches(seg0, p))
+			continue;
+		if (found) return NULL;
+		found = p;
+	}
+	return found;
+}
 
 /* ===================================================================
  *  Klasor olusturulurken titleId atama
@@ -833,30 +852,32 @@ static void install_hooks(void)
 		nest_log("[nest] sceKernelGetModuleInfo FAIL");
 		return;
 	}
-	if (mi.segments[0].memsz != SHELL_SEG0_SIZE) {
-		nest_log("[nest] SceShell is not 3.65 retail (seg0=0x%08X), no hooks",
-		         (unsigned)mi.segments[0].memsz);
+	const uint8_t *seg0 = mi.segments[0].vaddr;
+	shell_profile = shell_profile_find(seg0, mi.segments[0].memsz, mi.segments[1].memsz);
+	if (!shell_profile) {
+		nest_log("[nest] unsupported SceShell (seg0=0x%08X seg1=0x%08X), no hooks",
+		         (unsigned)mi.segments[0].memsz, (unsigned)mi.segments[1].memsz);
 		return;
 	}
+	const shell_profile_t *p = shell_profile;
+	nest_log("[nest] SceShell profile: %s", p->name);
 
-	const uint8_t *seg0 = mi.segments[0].vaddr;
 	shell_seg1 = (uint32_t)mi.segments[1].vaddr;
 	shell_seg0_lo = (uint32_t)seg0;
 	shell_seg0_hi = (uint32_t)seg0 + mi.segments[0].memsz;
 
-	if (code_matches(seg0 + OFF_WSTR_ASSIGN, EXPECT_WSTR_ASSIGN, 16)) {
-		const uint8_t *m = seg0 + OFF_WSTR_ASSIGN + 10;   /* movw r1 / ldr / movt r1 */
+	if (code_matches(seg0 + p->wstr_assign, EXPECT_WSTR_ASSIGN, sizeof(EXPECT_WSTR_ASSIGN))) {
+		const uint8_t *m = seg0 + p->wstr_assign + 10;
 		paf_wempty = thumb_imm16(m) | (thumb_imm16(m + 6) << 16);
-		shell_wstr_assign = (wstr_assign_t)((uint32_t)seg0 + OFF_WSTR_ASSIGN + 1); /* Thumb */
+		shell_wstr_assign = (wstr_assign_t)((uint32_t)seg0 + p->wstr_assign + 1);
 	} else {
 		nest_log("[nest] wstring assign signature mismatch, copied items stay untitled");
 	}
-	if (code_matches(seg0 + OFF_FOLDER_OPEN, EXPECT_OPEN, 16) &&
-	    code_matches(seg0 + OFF_FOLDER_CLOSE, EXPECT_CLOSE, 16)) {
-		/* open_hook, TAI_NEXT(ref_close) cagirir: close tutmadan open takilmaz */
-		uid_close = hook_at(&ref_close, ti.modid, OFF_FOLDER_CLOSE, (const void *)close_hook);
+	if (code_matches(seg0 + p->folder_open, EXPECT_OPEN, sizeof(EXPECT_OPEN)) &&
+	    code_matches(seg0 + p->folder_close, EXPECT_CLOSE, sizeof(EXPECT_CLOSE))) {
+		uid_close = hook_at(&ref_close, ti.modid, p->folder_close, (const void *)close_hook);
 		if (uid_close >= 0) {
-			uid_open = hook_at(&ref_open, ti.modid, OFF_FOLDER_OPEN, (const void *)open_hook);
+			uid_open = hook_at(&ref_open, ti.modid, p->folder_open, (const void *)open_hook);
 			if (uid_open < 0) {
 				taiHookRelease(uid_close, ref_close);
 				uid_close = -1;
@@ -865,72 +886,71 @@ static void install_hooks(void)
 	} else {
 		nest_log("[nest] folder open/close signature mismatch");
 	}
-	if (code_matches(seg0 + OFF_FL_ADD, EXPECT_FL_ADD, 16) &&
-	    code_matches(seg0 + OFF_FL_DEL, EXPECT_FL_DEL, 16)) {
-		uid_fladd = hook_at(&ref_fladd, ti.modid, OFF_FL_ADD, (const void *)fladd_hook);
-		uid_fldel = hook_at(&ref_fldel, ti.modid, OFF_FL_DEL, (const void *)fldel_hook);
+	if (code_matches(seg0 + p->fl_add, EXPECT_FL_ADD, sizeof(EXPECT_FL_ADD)) &&
+	    code_matches(seg0 + p->fl_del, EXPECT_FL_DEL, sizeof(EXPECT_FL_DEL))) {
+		uid_fladd = hook_at(&ref_fladd, ti.modid, p->fl_add, (const void *)fladd_hook);
+		uid_fldel = hook_at(&ref_fldel, ti.modid, p->fl_del, (const void *)fldel_hook);
 	} else {
 		nest_log("[nest] folder list signature mismatch");
 	}
 	if (uid_fladd >= 0 && uid_fldel >= 0 &&
-	    bytes_equal(seg0 + OFF_GATE1, GATE1_ORIG, 4) &&
-	    bytes_equal(seg0 + OFF_GATE2, GATE2_ORIG, 4) &&
-	    code_matches(seg0 + OFF_ISFOLDER, EXPECT_ISFOLDER, 16)) {
-		gate1_ret = ((uint32_t)seg0 + OFF_GATE1 + 4) | 1u;
-		gate2_ret = ((uint32_t)seg0 + OFF_GATE2 + 4) | 1u;
-		uid_isfolder = hook_at(&ref_isfolder, ti.modid, OFF_ISFOLDER, (const void *)isfolder_hook);
+	    thumb_bl_targets(seg0 + p->gate1, seg0 + p->isfolder) &&
+	    thumb_bl_targets(seg0 + p->gate2, seg0 + p->isfolder) &&
+	    code_matches(seg0 + p->isfolder, EXPECT_ISFOLDER, sizeof(EXPECT_ISFOLDER))) {
+		gate1_ret = ((uint32_t)seg0 + p->gate1 + 4) | 1u;
+		gate2_ret = ((uint32_t)seg0 + p->gate2 + 4) | 1u;
+		uid_isfolder = hook_at(&ref_isfolder, ti.modid, p->isfolder, (const void *)isfolder_hook);
 	} else {
 		nest_log("[nest] drop check signature mismatch");
 	}
-	if (code_matches(seg0 + OFF_ICONCAPTURE, EXPECT_ICONCAPTURE, 16)) {
-		uid_capture = hook_at(&ref_capture, ti.modid, OFF_ICONCAPTURE, (const void *)capture_hook);
+	if (code_matches(seg0 + p->iconcapture, EXPECT_ICONCAPTURE, sizeof(EXPECT_ICONCAPTURE))) {
+		uid_capture = hook_at(&ref_capture, ti.modid, p->iconcapture, (const void *)capture_hook);
 	} else {
 		nest_log("[nest] icon capture signature mismatch");
 	}
 	if (uid_capture >= 0 &&
-	    code_matches(seg0 + OFF_RELOAD, EXPECT_RELOAD, 16) &&
-	    code_matches(seg0 + OFF_CAPFIN, EXPECT_CAPFIN, 16)) {
-		uid_reload = hook_at(&ref_reload, ti.modid, OFF_RELOAD, (const void *)reload_hook);
+	    code_matches(seg0 + p->reload, EXPECT_RELOAD, sizeof(EXPECT_RELOAD)) &&
+	    code_matches(seg0 + p->capfin, EXPECT_CAPFIN, sizeof(EXPECT_CAPFIN))) {
+		uid_reload = hook_at(&ref_reload, ti.modid, p->reload, (const void *)reload_hook);
 		if (uid_reload >= 0) {
-			uid_capfin = hook_at(&ref_capfin, ti.modid, OFF_CAPFIN, (const void *)capfin_hook);
-			if (uid_capfin < 0) { taiHookRelease(uid_reload, ref_reload); uid_reload = -1; }
+			uid_capfin = hook_at(&ref_capfin, ti.modid, p->capfin, (const void *)capfin_hook);
+			if (uid_capfin < 0) {
+				taiHookRelease(uid_reload, ref_reload);
+				uid_reload = -1;
+			}
 		}
 	} else {
 		nest_log("[nest] icon refresh signature mismatch");
 	}
-	/* Ust klasor resminde ic klasor */
 	{
 		SceIoStat st;
-		const uint8_t *fr = seg0 + OFF_PAF_FREE;
 		int sig = uid_capture >= 0 && shell_str_assign == 0 &&
-		          code_matches(seg0 + OFF_STR_ASSIGN, EXPECT_STR_ASSIGN, 16);
-		if (sig) shell_str_assign = (str_assign_t)((uint32_t)seg0 + OFF_STR_ASSIGN + 1);
+		          code_matches(seg0 + p->str_assign, EXPECT_STR_ASSIGN, sizeof(EXPECT_STR_ASSIGN));
+		if (sig)
+			shell_str_assign = (str_assign_t)((uint32_t)seg0 + p->str_assign + 1);
 		sig = uid_capture >= 0 && shell_str_assign &&
-		      code_matches(seg0 + OFF_IMGGET, EXPECT_IMGGET, 16) &&
-		      bytes_equal(seg0 + OFF_CAP_CALL, EXPECT_CAP_CALL, 12) &&
-		      bytes_equal(seg0 + OFF_CAP_POS, EXPECT_CAP_POS, 6) &&
-		      bytes_equal(seg0 + OFF_CAP_LIST, EXPECT_CAP_LIST, 4) &&
-		      code_matches(seg0 + OFF_FLDR_PARAM, EXPECT_FLDR_PARAM, 16) &&
-		      fr[3] == 0xe3 && fr[7] == 0xe3 &&
-		      fr[8] == 0x1c && fr[9] == 0xff && fr[10] == 0x2f && fr[11] == 0xe1;
+		      code_matches(seg0 + p->imgget, EXPECT_IMGGET, sizeof(EXPECT_IMGGET)) &&
+		      bytes_equal(seg0 + p->cap_call, EXPECT_CAP_CALL, sizeof(EXPECT_CAP_CALL)) &&
+		      bytes_equal(seg0 + p->cap_pos, EXPECT_CAP_POS, sizeof(EXPECT_CAP_POS)) &&
+		      bytes_equal(seg0 + p->cap_list, EXPECT_CAP_LIST, sizeof(EXPECT_CAP_LIST)) &&
+		      code_matches(seg0 + p->fldr_param, EXPECT_FLDR_PARAM, sizeof(EXPECT_FLDR_PARAM));
 		if (!sig) {
 			nest_log("[nest] sub-folder icon signature mismatch");
 		} else if (sceIoGetstat(NEST_DATA_DIR "/nosubicon", &st) >= 0) {
 			nest_log("[nest] nosubicon file found, sub-folder icons off");
 		} else {
-			const uint8_t *m = seg0 + OFF_FLDR_PARAM;          /* movw r0 @0, movt r0 @8 */
+			const uint8_t *m = seg0 + p->fldr_param;
 			fldr_loader = thumb_imm16(m) | (thumb_imm16(m + 8) << 16);
-			paf_sempty = thumb_imm16(m + 4) | (thumb_imm16(seg0 + OFF_FLDR_PARAM + 14) << 16);
-			paf_free = (paf_free_t)((uint32_t)seg0 + OFF_PAF_FREE);   /* ARM */
-			uid_imgget = hook_at(&ref_imgget, ti.modid, OFF_IMGGET, (const void *)imgget_hook);
+			paf_sempty = thumb_imm16(m + 4) | (thumb_imm16(m + 14) << 16);
+			uid_imgget = hook_at(&ref_imgget, ti.modid, p->imgget, (const void *)imgget_hook);
 			subicon_on = uid_imgget >= 0;
 		}
 	}
-	if (code_matches(seg0 + OFF_MKFOLDERJOB, EXPECT_MKFOLDERJOB, 16) &&
-	    code_matches(seg0 + OFF_STR_ASSIGN, EXPECT_STR_ASSIGN, 16)) {
+	if (code_matches(seg0 + p->mkfolderjob, EXPECT_MKFOLDERJOB, sizeof(EXPECT_MKFOLDERJOB)) &&
+	    code_matches(seg0 + p->str_assign, EXPECT_STR_ASSIGN, sizeof(EXPECT_STR_ASSIGN))) {
 		fldr_scan_appdb();
-		shell_str_assign = (str_assign_t)((uint32_t)seg0 + OFF_STR_ASSIGN + 1); /* Thumb */
-		uid_mkjob = hook_at(&ref_mkjob, ti.modid, OFF_MKFOLDERJOB, (const void *)mkjob_hook);
+		shell_str_assign = (str_assign_t)((uint32_t)seg0 + p->str_assign + 1);
+		uid_mkjob = hook_at(&ref_mkjob, ti.modid, p->mkfolderjob, (const void *)mkjob_hook);
 	} else {
 		nest_log("[tid] new folder signature mismatch");
 	}
@@ -958,9 +978,12 @@ static int wait_shell_ready(void)
 		if (waited >= 60000) return waited;
 		sceKernelDelayThread(100 * 1000); waited += 100;
 	}
+	shell_profile = shell_profile_find(mi.segments[0].vaddr,
+		mi.segments[0].memsz, mi.segments[1].memsz);
+	if (!shell_profile) return -1;
 	uint32_t seg1 = (uint32_t)mi.segments[1].vaddr;
 	for (;;) {
-		uint32_t g = rd32(seg1 + SEG1_OFF_G);
+		uint32_t g = rd32(seg1 + shell_profile->seg1_g);
 		if (g && rd32(g + 0x4) && rd32(g + 0x24)) break;
 		if (waited >= 60000) {
 			nest_log("[nest] no Shell ready signal, continuing anyway");
@@ -981,7 +1004,7 @@ static int setup(SceSize args, void *argp)
 	sceIoMkdir(NEST_DATA_DIR, 0777);
 	sceIoRemove(NEST_DATA_DIR "/log.prev.txt");
 	sceIoRename(NEST_LOG_PATH, NEST_DATA_DIR "/log.prev.txt");
-	nest_log("[nest] nestfolder 1.0.2");
+	nest_log("[nest] nestfolder 1.0.3");
 
 	SceIoStat st;
 	if (sceIoGetstat(NEST_DATA_DIR "/delay20", &st) >= 0) {
@@ -989,7 +1012,7 @@ static int setup(SceSize args, void *argp)
 		nest_log("[nest] delay20: waited 20 s");
 	} else {
 		int ms = wait_shell_ready();
-		nest_log("[nest] Shell ready, active after %d ms", ms);
+		if (ms >= 0) nest_log("[nest] Shell ready, active after %d ms", ms);
 	}
 
 	if (sceIoGetstat(DISABLE_PATH, &st) >= 0) {

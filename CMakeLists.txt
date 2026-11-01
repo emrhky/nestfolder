@@ -39,7 +39,7 @@ nest_create_self(nestfolder.suprx nestfolder CONFIG exports.yml UNSAFE)
 #  Kurulum uygulamasi (VPK); eklenti payload/ altina gomulur
 # ------------------------------------------------------------------
 set(INSTALLER_TITLEID "NESTF0001")
-set(INSTALLER_VERSION "01.02")
+set(INSTALLER_VERSION "01.03")
 
 add_executable(nestfolder_installer
     installer/src/main.c
